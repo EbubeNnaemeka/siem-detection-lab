@@ -1,31 +1,48 @@
 ```
-Detection: Lateral movement via PsExec / admin shares
-MITRE ATT&CK: T1021.002 - Remote Services: SMB/Windows Admin Shares
-Data source: Windows Security + System Event Log (index=winlogs)
+Detection: Remote execution via PsExec-style tools (incl. renamed/clones)
+MITRE ATT&CK: T1021.002 SMB/Windows Admin Shares, T1569.002 Service Execution
+Data source: index=winlogs - System 7045, Security 5145, Sysmon 17/18
 
-Logic: Service creation event (7045) with a PsExec-style service name,
-correlated with an admin share (C$/ADMIN$) access from the same host within
-2 minutes.
+v2 - behaviour-based. v1 matched the service name PSEXESVC only and missed
+every lateral-movement sample in EVTX-ATTACK-SAMPLES (renamed PsExec, RemCom,
+cmd.exe services). Three signals, each tool-name independent:
+  svc_install   7045 service whose command line is a shell/LOLBin, or a
+                known remote-exec service name
+  admin_exe     5145 an .exe written to ADMIN$ / C$ (tool binary staged)
+  exec_pipe     Sysmon 17/18 pipe named <svc>-<host>-<pid>-stdin|stdout|stderr,
+                the PsExec I/O pattern that survives renaming
+Signals are correlated per host in 5-minute windows; more signals = higher
+severity. Needs "Audit Detailed File Share" (5145) and Sysmon PipeEvent logging.
 ```
 
-index=winlogs EventCode=7045 (ServiceName="PSEXESVC" OR ImagePath="*psexesvc*")
-| eval host_key=host
-| join type=left host_key
-    [ search index=winlogs EventCode=5140 ShareName IN ("\\*\\C$", "\\*\\ADMIN$")
-      | eval host_key=host ]
-| table _time, host, ServiceName, ImagePath, ShareName, src_ip
+index=winlogs
+    ((EventCode=7045)
+     OR (EventCode=5145 (ShareName="*\\ADMIN$" OR ShareName="*\\C$") RelativeTargetName="*.exe")
+     OR (source="*Sysmon*" (EventCode=17 OR EventCode=18) PipeName="*-std*"))
+| eval signal=case(
+    EventCode="7045" AND (match(ImagePath, "(?i)(cmd\.exe|%comspec%|powershell|rundll32|mshta|\\\\127\.0\.0\.1\\\\|\\\\admin\$)")
+                          OR match(ServiceName, "(?i)^(psexesvc|remcomsvc|csexecsvc|paexec)")), "svc_install",
+    EventCode="5145", "admin_exe",
+    match(PipeName, "(?i)-\d+-(stdin|stdout|stderr)$"), "exec_pipe")
+| where isnotnull(signal)
+| bin _time span=5m
+| stats dc(signal) as signal_count values(signal) as signals
+        values(ServiceName) as services values(ImagePath) as image_paths
+        values(RelativeTargetName) as files values(PipeName) as pipes values(src_ip) as src_ips
+        by host, _time
+| eval severity=case(signal_count>=2, "high", true(), "medium")
+| sort - signal_count
 
 ```
 False positives:
-- Legitimate remote administration by IT staff using PsExec for patching/deployment
-- SCCM/endpoint management tools that use similar service-creation patterns
+- IT staff using PsExec/PAExec for deployment (expect admin_exe + exec_pipe
+  from known admin workstations; allow-list those src_ips after review)
+- Installers that register services launching cmd.exe wrappers
 
 Analyst triage:
-1. Check if the source account is a known IT admin account with an open
-   change ticket for this timeframe
-2. If source account is a regular user account or a service account that
-   shouldn't be doing remote admin: escalate immediately (possible lateral
-   movement post-compromise)
-3. Pivot to the source host's process creation logs (Sysmon Event ID 1) to
-   look for credential dumping or C2 tooling preceding this event
+1. Is src_ips a known admin workstation with a change ticket? Document, close.
+2. Anything else, especially signal_count >= 2: treat as lateral movement,
+   isolate the target host, and pivot to the source host.
+3. On the source host, check Sysmon 1/10 just before this window for
+   credential dumping that would explain how the attacker got admin rights.
 ```

@@ -19,6 +19,22 @@
       </NetworkConnect>
     </RuleGroup>
 
+    <!-- Event ID 10: Process access (credential dumping from LSASS) -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessAccess onmatch="include">
+        <TargetImage condition="end with">lsass.exe</TargetImage>
+      </ProcessAccess>
+    </RuleGroup>
+
+    <!-- Event ID 17/18: Named pipes (PsExec-style <svc>-<host>-<pid>-stdin/stdout/stderr) -->
+    <RuleGroup name="" groupRelation="or">
+      <PipeEvent onmatch="include">
+        <PipeName condition="contains">-stdin</PipeName>
+        <PipeName condition="contains">-stdout</PipeName>
+        <PipeName condition="contains">-stderr</PipeName>
+      </PipeEvent>
+    </RuleGroup>
+
     <!-- Event ID 11: File create -->
     <RuleGroup name="" groupRelation="or">
       <FileCreate onmatch="include">

@@ -1,0 +1,58 @@
+name: detections
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-detections:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EVTX_SAMPLES_SHA: 4ceed2f4706daf601c212a8f91c113dd85349a2c
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate Sysmon config is well-formed XML
+        run: python -c "import xml.etree.ElementTree as E; E.parse('sysmon-config.xml')"
+
+      - name: Create throwaway credentials
+        run: |
+          echo "SPLUNK_PASSWORD=$(openssl rand -hex 12)" > .env
+          echo "SPLUNK_HEC_TOKEN=$(uuidgen)" >> .env
+
+      - name: Start Splunk
+        run: docker compose up -d
+
+      - name: Fetch and convert attack samples (pinned commit)
+        run: |
+          pip install python-evtx
+          curl -fsSL -o samples.zip "https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES/archive/${EVTX_SAMPLES_SHA}.zip"
+          unzip -q samples.zip
+          python scripts/convert_evtx.py "EVTX-ATTACK-SAMPLES-${EVTX_SAMPLES_SHA}" events.json
+
+      - name: Wait for Splunk to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            docker compose ps splunk --format '{{.Status}}' | grep -q '(healthy)' && exit 0
+            sleep 10
+          done
+          docker compose logs splunk | tail -50
+          exit 1
+
+      - name: Configure Splunk
+        run: python scripts/configure_splunk.py
+
+      - name: Load events
+        run: python scripts/load_sample_data.py events.json
+
+      - name: Wait for indexing
+        run: sleep 30
+
+      - name: Run detections and check expected results
+        run: python scripts/run_detections.py --check tests/expected_results.json
