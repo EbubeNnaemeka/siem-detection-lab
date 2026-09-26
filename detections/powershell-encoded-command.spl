@@ -1,0 +1,29 @@
+```
+Detection: Encoded/obfuscated PowerShell execution
+MITRE ATT&CK: T1059.001 - Command and Scripting Interpreter: PowerShell
+Data source: Sysmon Event ID 1 (Process Creation) via index=winlogs
+
+Logic: powershell.exe launched with -EncodedCommand/-enc, or with suspicious
+obfuscation flags (-nop -w hidden), which are common in fileless malware and
+post-exploitation frameworks.
+```
+
+index=winlogs source="*Sysmon*" EventCode=1 Image="*powershell.exe"
+    (CommandLine="*-EncodedCommand*" OR CommandLine="*-enc *" OR CommandLine="*-nop*-w*hidden*")
+| table _time, host, User, ParentImage, CommandLine
+| sort -_time
+
+```
+False positives:
+- Legitimate admin scripts/scheduled tasks that pass base64-encoded scripts
+  as a packaging convenience (common with SCCM/Intune deployments)
+- Some vendor management agents wrap PowerShell calls this way
+
+Analyst triage:
+1. Decode the Base64 blob (CyberChef "From Base64" recipe) to inspect the
+   actual command before deciding severity
+2. Check ParentImage — powershell.exe spawned from winword.exe/excel.exe/
+   outlook.exe is a strong phishing/macro-payload indicator, escalate
+3. Check ParentImage — spawned from a known deployment tool (sccm, ninite,
+   etc.) on a scheduled task account: likely benign, document and close
+```

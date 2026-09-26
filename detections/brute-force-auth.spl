@@ -1,0 +1,26 @@
+```
+Detection: Repeated failed authentication (brute force)
+MITRE ATT&CK: T1110 - Brute Force
+Data source: Windows Security Event Log (index=winlogs)
+
+Logic: 5+ Event ID 4625 (failed logon) from the same source IP against the
+same or different accounts within a 5-minute window.
+```
+
+index=winlogs EventCode=4625
+| bin _time span=5m
+| stats count as failed_attempts values(Account_Name) as targeted_accounts by src_ip, _time
+| where failed_attempts >= 5
+
+```
+False positives:
+- Service accounts with expired passwords retrying on a schedule
+- A user who genuinely forgot their password and fat-fingered it a few times
+
+Analyst triage:
+1. Check if targeted_accounts is a single account (password spray suspicion if
+   it's many accounts from one src_ip instead)
+2. Cross-reference src_ip against known VPN/office egress IPs
+3. If external/unrecognized src_ip: escalate as probable brute-force attempt
+4. If internal + single account + <10 attempts: likely user error, note and close
+```

@@ -1,0 +1,35 @@
+<Sysmon schemaversion="4.90">
+  <EventFiltering>
+    <!-- Event ID 1: Process creation -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessCreate onmatch="include">
+        <Image condition="end with">powershell.exe</Image>
+        <Image condition="end with">cmd.exe</Image>
+        <Image condition="end with">psexec.exe</Image>
+        <Image condition="end with">psexesvc.exe</Image>
+        <Image condition="end with">mimikatz.exe</Image>
+        <Image condition="end with">rundll32.exe</Image>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <!-- Event ID 3: Network connection -->
+    <RuleGroup name="" groupRelation="or">
+      <NetworkConnect onmatch="include">
+        <Image condition="end with">powershell.exe</Image>
+      </NetworkConnect>
+    </RuleGroup>
+
+    <!-- Event ID 11: File create -->
+    <RuleGroup name="" groupRelation="or">
+      <FileCreate onmatch="include">
+        <TargetFilename condition="end with">.ps1</TargetFilename>
+        <TargetFilename condition="end with">.exe</TargetFilename>
+      </FileCreate>
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>
+<!--
+  Trimmed, purpose-built config for this lab (not the full SwiftOnSecurity
+  ruleset) — scoped to the techniques exercised in detections/ so log volume
+  stays manageable on a single-VM lab.
+-->

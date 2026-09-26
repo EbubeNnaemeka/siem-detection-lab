@@ -1,0 +1,31 @@
+```
+Detection: Lateral movement via PsExec / admin shares
+MITRE ATT&CK: T1021.002 - Remote Services: SMB/Windows Admin Shares
+Data source: Windows Security + System Event Log (index=winlogs)
+
+Logic: Service creation event (7045) with a PsExec-style service name,
+correlated with an admin share (C$/ADMIN$) access from the same host within
+2 minutes.
+```
+
+index=winlogs EventCode=7045 (ServiceName="PSEXESVC" OR ImagePath="*psexesvc*")
+| eval host_key=host
+| join type=left host_key
+    [ search index=winlogs EventCode=5140 ShareName IN ("\\*\\C$", "\\*\\ADMIN$")
+      | eval host_key=host ]
+| table _time, host, ServiceName, ImagePath, ShareName, src_ip
+
+```
+False positives:
+- Legitimate remote administration by IT staff using PsExec for patching/deployment
+- SCCM/endpoint management tools that use similar service-creation patterns
+
+Analyst triage:
+1. Check if the source account is a known IT admin account with an open
+   change ticket for this timeframe
+2. If source account is a regular user account or a service account that
+   shouldn't be doing remote admin: escalate immediately (possible lateral
+   movement post-compromise)
+3. Pivot to the source host's process creation logs (Sysmon Event ID 1) to
+   look for credential dumping or C2 tooling preceding this event
+```
